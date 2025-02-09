@@ -12,8 +12,8 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-accesskit = { version = "0.16.0", path = "../../common" }
-accesskit_consumer = { version = "0.24.0", path = "../../consumer" }
+accesskit = { path = "../../common" }
+accesskit_consumer = { path = "../../consumer" }
 wasm-bindgen = "0.2.92"
 
 [dependencies.web-sys]

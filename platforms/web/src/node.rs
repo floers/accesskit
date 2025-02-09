@@ -162,22 +162,22 @@ impl<'a> NodeWrapper<'a> {
         self.0.is_focusable().then(|| "-1".into())
     }
 
-    fn name(&self) -> Option<String> {
-        self.0.name()
+    fn label(&self) -> Option<String> {
+        self.0.label()
     }
 
     fn aria_label(&self) -> Option<String> {
         if self.0.role() == Role::Label {
             return None;
         }
-        self.name()
+        self.label()
     }
 
     fn text_content(&self) -> Option<String> {
         if self.0.role() != Role::Label {
             return None;
         }
-        self.name()
+        self.label()
     }
 
     fn aria_checked(&self) -> Option<String> {
