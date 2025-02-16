@@ -1,0 +1,25 @@
+name: CI Web Tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  web-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: node:14.15.0-alpine3.12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: tests
+        run: |
+          #!/bin/bash
+          sudo apt update && sudo apt install curl firefox-esr -y
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall just
+          cargo binstall wasm-pack
+          cargo binstall
+          curl -L https://github.com/mozilla/geckodriver/releases/download/v0.35.0/geckodriver-v0.35.0-linux64.tar.gz -o geckodriver.tar.gz
+          tar -xvzf geckodriver.tar.gz
+          mv geckodriver /usr/local/bin
+          just test

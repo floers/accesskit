@@ -12,6 +12,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+log = "0.4"
 accesskit = { path = "../../common" }
 accesskit_consumer = { path = "../../consumer" }
 wasm-bindgen = "0.2.92"
@@ -22,5 +23,14 @@ features = [
     "Document",
     "Element",
     "HtmlElement",
-    "Window"
+    "HtmlInputElement",
+    "HtmlSelectElement",
+    "Window",
+    "CssStyleDeclaration",
+    "InputEvent",
+    "KeyboardEvent",
+    "ClipboardEvent",
+    "DataTransfer",
+    "Event",
+    "EventTarget",
 ]

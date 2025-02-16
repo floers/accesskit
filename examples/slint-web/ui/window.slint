@@ -1,0 +1,54 @@
+import { Button, LineEdit, Palette, CheckBox, ComboBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    background: Palette.alternate-background;
+    width: 800px;
+    height: 600px;
+
+    in-out property <int> count: 0;
+
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+
+            VerticalLayout {
+                alignment: start;
+                spacing: 1rem;
+
+                Text {
+                    text: "Counter: " + count;
+                }
+
+                Button {
+                    primary: true;
+                    text: "button text";
+                    accessible-label: "button label";
+                    clicked => {
+                        count += 1;
+                    }
+                }
+
+                LineEdit {
+                    placeholder-text: "line edit placeholder";
+
+                    accessible-label: "line edit label";
+                }
+
+                CheckBox {
+                    text: "checkbox text";
+
+                    accessible-label: "checkbox label";
+                }
+
+                ComboBox {
+                    model: [
+                        "first",
+                        "second",
+                        "third",
+                    ];
+                }
+            }
+        }
+    }
+}

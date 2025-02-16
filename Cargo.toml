@@ -17,6 +17,9 @@ default-members = [
     "platforms/web",
     "platforms/winit",
 ]
+exclude = [
+    "examples/slint-web",
+]
 
 [workspace.package]
 authors = ["The AccessKit contributors"]

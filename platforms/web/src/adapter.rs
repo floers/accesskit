@@ -4,12 +4,31 @@
 // the LICENSE-MIT file), at your option.
 
 use accesskit::{ActionHandler, ActivationHandler, NodeId, TreeUpdate};
-use accesskit_consumer::{FilterResult, Node, Tree, TreeChangeHandler, TreeState};
-use std::collections::HashMap;
-use wasm_bindgen::JsCast;
-use web_sys::{Document, Element, HtmlElement};
+use accesskit_consumer::{FilterResult, Node, Tree, TreeChangeHandler};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
+use web_sys::{ClipboardEvent, Document, Element, Event, HtmlElement, InputEvent, KeyboardEvent};
 
-use crate::{filters::filter, node::NodeWrapper};
+use crate::{elements, filters::filter, node::NodeWrapper};
+
+#[derive(Debug)]
+pub(crate) struct AdapterError {
+    msg: String,
+}
+impl std::fmt::Display for AdapterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}", self.msg)
+    }
+}
+impl From<JsValue> for AdapterError {
+    fn from(value: JsValue) -> Self {
+        Self {
+            msg: value
+                .as_string()
+                .unwrap_or_else(|| "Unknown error".to_string()),
+        }
+    }
+}
 
 enum State {
     Pending {
@@ -25,9 +44,11 @@ enum State {
     },
 }
 
+pub(crate) type SharedActionHandler = Rc<RefCell<dyn ActionHandler>>;
+
 pub struct Adapter {
     state: State,
-    action_handler: Box<dyn ActionHandler>,
+    action_handler: SharedActionHandler,
 }
 
 impl Adapter {
@@ -36,13 +57,16 @@ impl Adapter {
         mut activation_handler: impl ActivationHandler,
         action_handler: impl 'static + ActionHandler + Send,
     ) -> Self {
+        let action_handler = Rc::new(RefCell::new(action_handler));
+        // TODO remove unwraps
         let document = web_sys::window().unwrap().document().unwrap();
         let parent = document.get_element_by_id(parent_id).unwrap();
 
         let state = match activation_handler.request_initial_tree() {
             Some(initial_state) => {
                 let tree = Tree::new(initial_state, true);
-                let (root, elements) = add_initial_tree(&document, &parent, &tree);
+                let (root, elements) =
+                    add_initial_tree(&document, &parent, &tree, action_handler.clone());
                 State::Active {
                     tree,
                     document,
@@ -58,7 +82,7 @@ impl Adapter {
         };
         Self {
             state,
-            action_handler: Box::new(action_handler),
+            action_handler,
         }
     }
 
@@ -70,7 +94,8 @@ impl Adapter {
                 parent,
             } => {
                 let tree = Tree::new(update_factory(), *is_host_focused);
-                let (root, elements) = add_initial_tree(document, parent, &tree);
+                let (root, elements) =
+                    add_initial_tree(document, parent, &tree, self.action_handler.clone());
                 self.state = State::Active {
                     tree,
                     document: document.clone(),
@@ -84,7 +109,11 @@ impl Adapter {
                 elements,
                 ..
             } => {
-                let mut handler = AdapterChangeHandler { document, elements };
+                let mut handler = AdapterChangeHandler {
+                    document,
+                    elements,
+                    action_handler: self.action_handler.clone(),
+                };
                 tree.update_and_process_changes(update_factory(), &mut handler);
             }
         }
@@ -101,7 +130,11 @@ impl Adapter {
                 elements,
                 ..
             } => {
-                let mut handler = AdapterChangeHandler { document, elements };
+                let mut handler = AdapterChangeHandler {
+                    document,
+                    elements,
+                    action_handler: self.action_handler.clone(),
+                };
                 tree.update_host_focus_state_and_process_changes(is_focused, &mut handler);
             }
         }
@@ -112,6 +145,7 @@ fn add_initial_tree(
     document: &Document,
     parent: &Element,
     tree: &Tree,
+    action_handler: SharedActionHandler,
 ) -> (HtmlElement, HashMap<NodeId, HtmlElement>) {
     let root = document
         .create_element("div")
@@ -121,7 +155,7 @@ fn add_initial_tree(
     parent.append_child(&root).unwrap();
     let mut elements = HashMap::new();
     let root_node = tree.state().root();
-    add_element_recursive(document, &root, &root_node, &mut elements);
+    add_element_recursive(document, &root, &root_node, &mut elements, action_handler);
     if let Some(focus_id) = tree.state().focus_id() {
         if let Some(element) = elements.get(&focus_id) {
             focus(element);
@@ -135,16 +169,31 @@ fn add_element(
     parent: &HtmlElement,
     node: &Node,
     elements: &mut HashMap<NodeId, HtmlElement>,
-) -> HtmlElement {
-    let element = document
-        .create_element("div")
-        .unwrap()
-        .unchecked_into::<HtmlElement>();
+    action_handler: SharedActionHandler,
+) -> Result<HtmlElement, AdapterError> {
+    let element = match node.role() {
+        accesskit::Role::Button => elements::handle_button(document, node, &action_handler)?,
+        accesskit::Role::TextInput => elements::handle_input(document, node, &action_handler)?,
+        accesskit::Role::CheckBox => elements::handle_checkbox(document, node, &action_handler)?,
+        accesskit::Role::ComboBox => elements::handle_combobox(document, node, &action_handler)?,
+        _ => document
+            .create_element("div")?
+            .unchecked_into::<HtmlElement>(),
+    };
+
+    if let Some(bb) = node.bounding_box() {
+        let style = element.style();
+        let _ = style.set_property("position", "absolute");
+        let _ = style.set_property("top", &format!("{}px", bb.min_y()));
+        let _ = style.set_property("left", &format!("{}px", bb.min_x()));
+        let _ = style.set_property("width", &format!("{}px", bb.width()));
+        let _ = style.set_property("height", &format!("{}px", bb.height()));
+    }
     let wrapper = NodeWrapper(*node);
     wrapper.set_all_attributes(&element);
-    parent.append_child(&element).unwrap();
+    parent.append_child(&element)?;
     elements.insert(node.id(), element.clone());
-    element
+    Ok(element)
 }
 
 fn add_element_recursive(
@@ -152,10 +201,12 @@ fn add_element_recursive(
     parent: &HtmlElement,
     node: &Node,
     elements: &mut HashMap<NodeId, HtmlElement>,
+    action_handler: SharedActionHandler,
 ) {
-    let element = add_element(document, parent, node, elements);
-    for child in node.filtered_children(&filter) {
-        add_element_recursive(document, &element, &child, elements);
+    if let Ok(element) = add_element(document, parent, node, elements, action_handler.clone()) {
+        for child in node.filtered_children(&filter) {
+            add_element_recursive(document, &element, &child, elements, action_handler.clone());
+        }
     }
 }
 
@@ -170,6 +221,7 @@ fn blur(element: &HtmlElement) {
 struct AdapterChangeHandler<'a> {
     document: &'a Document,
     elements: &'a mut HashMap<NodeId, HtmlElement>,
+    action_handler: SharedActionHandler,
 }
 
 impl TreeChangeHandler for AdapterChangeHandler<'_> {
@@ -180,9 +232,17 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
         if self.elements.contains_key(&node.id()) {
             return;
         }
-        let parent = node.filtered_parent(&filter).unwrap();
-        let parent_element = self.elements.get(&parent.id()).unwrap().clone();
-        add_element(self.document, &parent_element, node, self.elements);
+        if let Some(parent) = node.filtered_parent(&filter) {
+            if let Some(parent_element) = self.elements.get(&parent.id()).cloned() {
+                let _ = add_element(
+                    self.document,
+                    &parent_element,
+                    node,
+                    self.elements,
+                    self.action_handler.clone(),
+                );
+            }
+        }
     }
 
     fn node_updated(&mut self, old_node: &Node, new_node: &Node) {

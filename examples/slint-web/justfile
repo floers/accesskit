@@ -1,0 +1,11 @@
+help:
+    just --list
+
+wasm:
+    SLINT_STYLE=cosmic wasm-pack build --release --target web -d web/pkg
+
+run:
+    cargo run --bin server --features server
+
+test: wasm
+    TEST=1 just run
